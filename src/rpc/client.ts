@@ -1,29 +1,32 @@
-import { FetchHttpClient } from '@effect/platform'
-import { RpcClient, RpcSerialization } from '@effect/rpc'
-import { Effect, Layer } from 'effect'
-import { MinimalPingRpc } from './request'
+import { FetchHttpClient } from "@effect/platform"
+import { RpcClient, RpcSerialization } from "@effect/rpc"
+import { Chunk, Effect, Layer, Option, Stream } from "effect"
+import { UserRpcs } from "./request.js"
 
-export const ProtocolLive = RpcClient.layerProtocolHttp({
-  url: 'http://localhost:3000/api/rpc',
-}).pipe(Layer.provide([FetchHttpClient.layer, RpcSerialization.layerJson]))
+// Choose which protocol to use
+const ProtocolLive = RpcClient.layerProtocolHttp({
+  url: "http://localhost:3000/api/rpc"
+}).pipe(
+  Layer.provide([
+    // use fetch for http requests
+    FetchHttpClient.layer,
+    // use ndjson for serialization
+    RpcSerialization.layerNdjson
+  ])
+)
 
-export class PingClient extends Effect.Service<PingClient>()('PingClient', {
-  scoped: RpcClient.make(MinimalPingRpc),
-}) {}
-
+// Use the client
 const program = Effect.gen(function* () {
-  const client = yield* PingClient
-  yield* Effect.log('client (PingClient)', client)
-  const result = yield* client.Ping({})
-  yield* Effect.log('Ping result', result)
-  return result
+  const client = yield* RpcClient.make(UserRpcs)
+  let users = yield* Stream.runCollect(client.UserList({}))
+  if (Option.isNone(Chunk.findFirst(users, (user) => user.id === "3"))) {
+    console.log(`Creating user "Charlie"`)
+    yield* client.UserCreate({ name: "Charlie" })
+    users = yield* Stream.runCollect(client.UserList({}))
+  } else {
+    console.log(`User "Charlie" already exists`)
+  }
+  return users
 }).pipe(Effect.scoped)
 
-program
-  .pipe(
-    Effect.provide(PingClient.Default),
-    Effect.provide(ProtocolLive),
-    Effect.runPromise,
-  )
-  .then(console.log)
-  .catch(console.error)
+program.pipe(Effect.provide(ProtocolLive), Effect.runPromise).then(console.log)

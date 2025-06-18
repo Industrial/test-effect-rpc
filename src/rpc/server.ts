@@ -1,17 +1,24 @@
-import { HttpApp } from '@effect/platform'
-import { RpcSerialization, RpcServer } from '@effect/rpc'
-import { Effect } from 'effect'
-import { MinimalPingRpc } from './request'
+// server.ts
+import { HttpRouter } from "@effect/platform"
+import { BunHttpServer, BunRuntime } from "@effect/platform-bun"
+import { RpcSerialization, RpcServer } from "@effect/rpc"
+import { Layer } from "effect"
+import { UsersLive } from "./handlers.js"
+import { UserRpcs } from "./request.js"
 
-export const MinimalPingLive = MinimalPingRpc.toLayer(
-  Effect.gen(function* () {
-    return {
-      Ping: () => Effect.succeed('pong'),
-    }
-  }),
+// Create the RPC server layer
+const RpcLayer = RpcServer.layer(UserRpcs).pipe(Layer.provide(UsersLive))
+
+// Choose the protocol and serialization format
+const HttpProtocol = RpcServer.layerProtocolHttp({
+  path: "/api/rpc"
+}).pipe(Layer.provide(RpcSerialization.layerNdjson))
+
+// Create the main server layer
+const Main = HttpRouter.Default.serve().pipe(
+  Layer.provide(RpcLayer),
+  Layer.provide(HttpProtocol),
+  Layer.provide(BunHttpServer.layer({ port: 3000 }))
 )
 
-export const RpcWebHandler = RpcServer.toHttpApp(MinimalPingRpc)
-  .pipe(Effect.map(HttpApp.toWebHandler))
-  .pipe(Effect.provide(MinimalPingLive))
-  .pipe(Effect.provide(RpcSerialization.layerJson))
+BunRuntime.runMain(Layer.launch(Main))
